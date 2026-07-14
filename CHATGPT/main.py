@@ -1,6 +1,9 @@
 import sys
 import numpy as np
 
+
+import receiver
+
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 import pyqtgraph as pg
@@ -39,7 +42,7 @@ class MainWindow(QWidget):
         self.ipLabel = QLabel("RP IP")
 
         self.ipEdit = QLineEdit()
-        self.ipEdit.setText("192.168.54.171")
+        self.ipEdit.setText("rp-f05e99.local")
 
         self.userLabel = QLabel("User")
 
@@ -283,7 +286,7 @@ class MainWindow(QWidget):
 
     def connectSSH(self):
 
-        from ssh_controller import SSHController
+        from ssh_client import SSHController
 
         if self.ssh is not None:
 
@@ -325,7 +328,7 @@ class MainWindow(QWidget):
 
             return
 
-        from slope.receiver import ReceiverWorker
+        from receiver import ReceiverWorker
 
         self.receiver = ReceiverWorker(
 

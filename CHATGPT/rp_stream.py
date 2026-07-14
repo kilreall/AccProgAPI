@@ -382,6 +382,61 @@ rp.rp_AcqSetDecimation(
 # Main
 ##############################################################################
 
+## deepseek
+
+###########################################################################
+# Gain
+###########################################################################
+
+if args.gain.upper() == "HV":
+    rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_HIGH)
+    rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_HIGH)
+    print("Gain set to HV (±20V)")
+elif args.gain.upper() == "LV":
+    rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_LOW)
+    rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_LOW)
+    print("Gain set to LV (±1V)")
+else:
+    print(f"Warning: Unknown gain '{args.gain}', using default HV")
+    rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_HIGH)
+    rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_HIGH)
+
+###########################################################################
+# Trigger level
+###########################################################################
+
+if args.gain.upper() == "HV":
+    if abs(args.trigger) > 20:
+        print(f"Warning: Trigger level {args.trigger}V exceeds HV range (±20V), clipping")
+        trigger_value = max(-20, min(20, args.trigger))
+    else:
+        trigger_value = args.trigger
+else:  # LV
+    if abs(args.trigger) > 1:
+        print(f"Warning: Trigger level {args.trigger}V exceeds LV range (±1V), clipping")
+        trigger_value = max(-1, min(1, args.trigger))
+    else:
+        trigger_value = args.trigger
+
+rp.rp_AcqSetTriggerLevel(trigger_value)
+print(f"Trigger level set to {trigger_value}V")
+
+###########################################################################
+# Trigger delay
+###########################################################################
+
+MAX_DELAY = 16384
+
+if args.delay < 0 or args.delay > MAX_DELAY:
+    print(f"Warning: Delay {args.delay} outside range 0-{MAX_DELAY}, clipping")
+    delay_value = max(0, min(MAX_DELAY, args.delay))
+else:
+    delay_value = args.delay
+
+rp.rp_AcqSetTriggerDelay(delay_value)
+print(f"Trigger delay set to {delay_value} samples")
+
+
 def main():
 
     print("-------------------------------------")
