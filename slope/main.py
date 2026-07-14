@@ -325,7 +325,7 @@ class MainWindow(QWidget):
 
             return
 
-        from receiver import ReceiverWorker
+        from slope.receiver import ReceiverWorker
 
         self.receiver = ReceiverWorker(
 
@@ -371,7 +371,7 @@ class MainWindow(QWidget):
             f"--delay {self.delayBox.value()} "
         )
 
-        self.ssh.exec(command)
+        self.ssh.exec_background(command)
 
     #################################################################
 
@@ -391,7 +391,7 @@ class MainWindow(QWidget):
             f"--dec {self.decBox.currentText()} "
         )
 
-        self.ssh.exec(command)
+        self.ssh.exec_background(command)
 
         #################################################################
     # Stop acquisition
