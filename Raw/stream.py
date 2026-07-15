@@ -41,8 +41,10 @@ def acquisition():
         )
         print("t2", (time.perf_counter() - t2)*1e3)
 
+        tt = time.perf_counter()
         while not rp.rp_AcqGetBufferFillState()[1]:
             pass
+        print("tt", (time.perf_counter() - tt)*1e3)
 
         t3 = time.perf_counter()
         rp.rp_AcqGetOldestDataRaw(
@@ -127,7 +129,6 @@ rp.rp_AcqReset()
 rp.rp_AcqSetDecimation(
     rp.RP_DEC_1
 )
-
 
 t1 = threading.Thread(
     target=acquisition

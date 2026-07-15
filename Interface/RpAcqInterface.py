@@ -389,19 +389,18 @@ class MainWindow(QWidget):
     @pyqtSlot(np.ndarray)
     def update_plot_trigger(self, ch1_proc):
 
-        # now = time.perf_counter()
+        now = time.perf_counter()
 
-        # if self.last_frame_time is not None:
-        #     dt = (now - self.last_frame_time) * 1000  # мс
+        if self.last_frame_time is not None:
+            dt = (now - self.last_frame_time) * 1000  # мс
 
-        #     print(
-        #         f"Frame {self.frame_counter}: "
-        #         f"{dt:.3f} ms  "
-        #         f"({1/dt*1000:.1f} Hz)"
-        #     )
+            print(
+                f"Frame {self.frame_counter}: "
+                f"{dt:.3f} ms  "
+            )
 
-        # self.last_frame_time = now
-        # self.frame_counter += 1
+        self.last_frame_time = now
+        self.frame_counter += 1
 
         self.plot1.setData(ch1_proc)
         self.plot2.clear()

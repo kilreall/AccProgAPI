@@ -121,7 +121,7 @@ rp.rp_Init()
 rp.rp_AcqReset()
 
 rp.rp_AcqSetDecimation(
-    rp.RP_DEC_1024
+    rp.RP_DEC_1
 )
 
 
