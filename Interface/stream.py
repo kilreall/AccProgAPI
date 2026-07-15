@@ -21,7 +21,10 @@ def acquisition():
     ibuff1 = rp.i16Buffer(N)
     #ibuff2 = rp.i16Buffer(N)
 
+    
+
     while True:
+
 
         #t1 = time.perf_counter()
         rp.rp_AcqStart()
