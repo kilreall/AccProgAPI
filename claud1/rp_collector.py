@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Acquisition + TCP sender. Runs directly on the Red Pitaya board (needs the `rp` module)."""
 
 import argparse

@@ -60,89 +60,149 @@ class TriggerWorkerSignals(QObject):
     data = pyqtSignal(np.ndarray)
 
 class TriggerWorker(QRunnable):
-    def __init__(self, rp_ip, data_port, script_path, ssh_user, ssh_pass, save_path):
+    def __init__(self, rp_ip, save_path):
         super().__init__()
         self.rp_ip = rp_ip
-        self.data_port = data_port
-        self.script_path = script_path
-        self.ssh_user = ssh_user
-        self.ssh_pass = ssh_pass
+        self.data_port = 5000
+        self.ssh_user = "root"
+        self.ssh_pass = "root"
         self.save_path = save_path
         self.signals = TriggerWorkerSignals()
         self._is_running = True
         self.all_data = []
+        self.client = None
+        self.stdin = None
+        self.stdout = None
+        self.stderr = None
+
+        self.server_sock = None
+        self.conn = None
+
+    def start_remote_stream(self):
+
+        self.client = paramiko.SSHClient()
+        self.client.set_missing_host_key_policy(
+            paramiko.AutoAddPolicy()
+        )
+
+        self.client.connect(
+            self.rp_ip,
+            username=self.ssh_user,
+            password=self.ssh_pass,
+            timeout=5
+        )
+
+        cmd = "PYTHONPATH=/opt/redpitaya/lib/python:$PYTHONPATH /usr/bin/python3 /root/stream.py"
+
+        self.stdin, self.stdout, self.stderr = \
+            self.client.exec_command(cmd)
+
+        print("Remote stream started.")
+
+    def wait_connection(self):
+
+        print("Waiting for RedPitaya...")
+
+        self.conn, addr = self.server_sock.accept()
+
+        print(f"Connected from {addr}")
+        
+
+    def receive_loop(self):
+
+        buffer = bytearray()
+
+        while self._is_running:
+
+            data = self.conn.recv(65536)
+
+            if not data:
+                break
+
+            buffer.extend(data)
+
+            while len(buffer) >= PACKET_BYTES:
+
+                packet = np.frombuffer(
+                    buffer[:PACKET_BYTES],
+                    dtype=np.int16
+                )
+
+                buffer = buffer[PACKET_BYTES:]
+
+                self.all_data.append(packet.copy())
+
+                ch1 = (
+                    packet.astype(np.float32) + 168
+                ) / 8191 * 20
+
+                self.signals.data.emit(ch1)
+
+    def cleanup(self):
+
+        if self.conn:
+            self.conn.close()
+
+        if self.server_sock:
+            self.server_sock.close()
+
+        if self.client:
+            self.client.close()
 
     @pyqtSlot()
     def run(self):
-        print("Trigger mode (SSH) started")
 
-        # 1. Создаём TCP-сервер на заданном порту
-        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_sock.settimeout(10.0)
-        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM
+        )
+
+        self.server_sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEADDR,
+            1
+        )
+
+        self.server_sock.bind(
+            ("0.0.0.0", self.data_port)
+        )
+
+        self.server_sock.listen(1)
+
         try:
-            server_sock.bind(('0.0.0.0', self.data_port))
-            server_sock.listen(1)
-            print(f"Server listening on port {self.data_port}")
-        except OSError as e:
-            print(f"Bind error: {e}")
+
+            self.start_remote_stream()
+
+            self.wait_connection()
+
+            self.receive_loop()
+
+        finally:
+
+            self.cleanup()
+
             self.signals.finished.emit()
+
+            self.save_data()
+
+    def save_data(self):
+
+        if len(self.all_data) == 0:
+            print("No data to save")
             return
 
-        conn = None
-        buffer = bytearray()
-        try:
-            # 2. Запускаем скрипт на RP по SSH (без аргументов)
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(self.rp_ip, username=self.ssh_user, password=self.ssh_pass, timeout=5)
+        data = np.concatenate(self.all_data)
 
-            cmd = f"python3 {self.script_path}"
-            print(f"Executing on RP: {cmd}")
-            ssh.exec_command(cmd, get_pty=False)  # скрипт запущен, дальше он работает сам
-            time.sleep(1)  # даём время на инициализацию и подключение
+        filename = os.path.join(
+            self.save_path,
+            f"trigger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npz"
+        )
 
-            # 3. Принимаем соединение от RP
-            try:
-                conn, addr = server_sock.accept()
-                print(f"Connected from {addr}")
-                server_sock.settimeout(1.0)
-                while self._is_running:
-                    try:
-                        data = conn.recv(65536)
-                    except socket.timeout:
-                        continue
-                    if not data:
-                        print("Connection closed")
-                        break
-                    buffer.extend(data)
-                    while len(buffer) >= PACKET_BYTES:
-                        packet_bytes = buffer[:PACKET_BYTES]
-                        buffer = buffer[PACKET_BYTES:]
-                        packet = np.frombuffer(packet_bytes, dtype=np.int16)
-                        self.all_data.append(packet.copy())
-                        ch1_proc = (packet.astype(np.float32) + 168) / 8191.0 * 20
-                        self.signals.data.emit(ch1_proc)
-            except socket.timeout:
-                print("Timeout waiting for RP connection. Check IP, port and firewall.")
-        except Exception as e:
-            print(f"SSH error: {e}")
-        finally:
-            server_sock.close()
-            if conn:
-                conn.close()
-            if self.all_data:
-                try:
-                    name = datetime.now().strftime("%d%m%y%H%M%S")
-                    ran_pref = f"{random.randint(0, 99):02d}"
-                    ln = f"{len(self.all_data)}"
-                    filename = f"{self.save_path}/{ran_pref}{name}{ln}.npy"
-                    np.save(filename, np.array(self.all_data))
-                    print(f"Saved {len(self.all_data)} packets to {filename}")
-                except Exception as e:
-                    print(f"Save error: {e}")
-            print("Trigger mode finished")
-            self.signals.finished.emit()
+        os.makedirs(self.save_path, exist_ok=True)
+
+        np.savez_compressed(filename, msts=np.array(data))
+
+        print(f"Saved {len(data)} samples to {filename}")
 
     def stop(self):
         self._is_running = False
@@ -152,12 +212,10 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.ip = 'rp-f05e99.local'
-        self.path = r'C:/temp'
-        self.script_path = '/root/stream.py'
+        self.path = r'Interface'
         self.threadpool = QThreadPool()
         self.trigger_worker = None
         self.continuous_worker = None
-        self.ssh_client = None
         self.initUI()
 
     def initUI(self):
@@ -177,29 +235,6 @@ class MainWindow(QWidget):
         self.ip_input.setPlaceholderText("192.168.1.100")
         self.ip_input.textChanged.connect(self.on_ip_changed)
 
-        self.connect_button = QPushButton("Connect")
-        self.connect_button.setFixedSize(100, 35)
-        self.connect_button.clicked.connect(self.connect_to_rp)
-        self.connection_status = QLabel("Not connected")
-        self.connection_status.setStyleSheet("color: red;")
-
-        self.ssh_user_label = QLabel("SSH user:")
-        self.ssh_user_input = QLineEdit("root")
-        self.ssh_user_input.setFixedSize(80, 25)
-        self.ssh_pass_label = QLabel("SSH pass:")
-        self.ssh_pass_input = QLineEdit("root")
-        self.ssh_pass_input.setFixedSize(80, 25)
-        self.ssh_pass_input.setEchoMode(QLineEdit.Password)
-
-        self.port_label = QLabel("Data port:")
-        self.port_input = QSpinBox()
-        self.port_input.setFixedSize(70, 25)
-        self.port_input.setRange(1024, 65535)
-        self.port_input.setValue(5000)
-
-        self.script_label = QLabel("Script on RP:")
-        self.script_path_input = QLineEdit(self.script_path)
-        self.script_path_input.setFixedSize(140, 25)
 
         # Поля для Continuous mode (они же видны всегда, но Trigger mode их игнорирует)
         self.int_label = QLabel("Decimation:")
@@ -213,12 +248,6 @@ class MainWindow(QWidget):
         self.trig_input.setFixedSize(70, 25)
         self.trig_input.setText("CHB_PE")
 
-        self.ttime_label = QLabel("Acq time (ms):")
-        self.ttime_input = QDoubleSpinBox()
-        self.ttime_input.setFixedSize(60, 25)
-        self.ttime_input.setRange(0, 1000)
-        self.ttime_input.setDecimals(3)
-        self.ttime_input.setValue(33.556)
 
         # Кнопки
         self.start_trigger_button = QPushButton('Trigger mode (TCP)')
@@ -243,31 +272,19 @@ class MainWindow(QWidget):
         self.plot_widget_ch2.showGrid(x=True, y=True)
         self.plot2 = self.plot_widget_ch2.plot(pen=pg.mkPen(color='r', width=1), name='CH2')
         self.plot_widget_ch1.setXLink(self.plot_widget_ch2)
-        self.plot_widget_ch1.setXRange(0., self.ttime_input.value())
+
 
         # Layout
         main_layout = QHBoxLayout()
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.ip_label)
         left_layout.addWidget(self.ip_input)
-        left_layout.addWidget(self.connect_button)
-        left_layout.addWidget(self.connection_status)
-        left_layout.addWidget(self.ssh_user_label)
-        left_layout.addWidget(self.ssh_user_input)
-        left_layout.addWidget(self.ssh_pass_label)
-        left_layout.addWidget(self.ssh_pass_input)
-        left_layout.addWidget(self.port_label)
-        left_layout.addWidget(self.port_input)
-        left_layout.addWidget(self.script_label)
-        left_layout.addWidget(self.script_path_input)
         left_layout.addWidget(self.int_label)
         left_layout.addWidget(self.int_input)
         left_layout.addWidget(self.trig_label)
         left_layout.addWidget(self.trig_input)
         left_layout.addWidget(self.start_continuous_button)
         left_layout.addWidget(self.start_trigger_button)
-        left_layout.addWidget(self.ttime_label)
-        left_layout.addWidget(self.ttime_input)
         left_layout.addWidget(self.path_label)
         left_layout.addWidget(self.path_input)
         left_layout.addWidget(self.browse_button)
@@ -291,33 +308,13 @@ class MainWindow(QWidget):
 
     def on_ip_changed(self, text):
         self.ip = text
-        self.connection_status.setText("Not connected")
-        self.connection_status.setStyleSheet("color: red;")
 
-    def connect_to_rp(self):
-        ip = self.ip_input.text().strip()
-        if not ip:
-            return
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(ip, username='root', password='root', timeout=5)
-            self.ssh_client = ssh
-            self.connection_status.setText("Connected")
-            self.connection_status.setStyleSheet("color: green;")
-        except Exception as e:
-            self.connection_status.setText("Connection failed")
-            self.connection_status.setStyleSheet("color: red;")
 
     def start_trigger_worker(self):
         self.stop_workers()
         # Используем только необходимые параметры: IP RP, порт, путь к скрипту, учётные данные SSH
         self.trigger_worker = TriggerWorker(
             rp_ip=self.ip_input.text().strip(),
-            data_port=self.port_input.value(),
-            script_path=self.script_path_input.text().strip(),
-            ssh_user=self.ssh_user_input.text().strip() or "root",
-            ssh_pass=self.ssh_pass_input.text().strip() or "root",
             save_path=self.path_input.text()
         )
         self.trigger_worker.signals.finished.connect(self.trigger_worker_finished)

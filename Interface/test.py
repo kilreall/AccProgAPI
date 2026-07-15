@@ -1,6 +1,6 @@
 import paramiko
 
-HOST = "192.168.1.100"
+HOST = "rp-f05e99.local"
 USER = "root"
 PASSWORD = "root"
 
@@ -13,8 +13,12 @@ client.connect(
     password=PASSWORD
 )
 
+cmd = "PYTHONPATH=/opt/redpitaya/lib/python:$PYTHONPATH /usr/bin/python3 /root/stream.py"
+
+
+
 stdin, stdout, stderr = client.exec_command(
-    "python3 /root/my_script.py"
+    cmd
 )
 
 print("STDOUT:")
