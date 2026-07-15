@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from datetime import datetime
 import sys, time, random, os, socket, paramiko
 import numpy as np
+import time
 import pyqtgraph as pg
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -69,7 +70,8 @@ class TriggerWorker(QRunnable):
         self.save_path = save_path
         self.signals = TriggerWorkerSignals()
         self._is_running = True
-        self.all_data = []
+        self.temp_file = None
+        self.samples_count = 0
         self.client = None
         self.stdin = None
         self.stdout = None
@@ -105,6 +107,8 @@ class TriggerWorker(QRunnable):
 
         self.conn, addr = self.server_sock.accept()
 
+        self.conn.settimeout(1.0)
+
         print(f"Connected from {addr}")
         
 
@@ -114,7 +118,11 @@ class TriggerWorker(QRunnable):
 
         while self._is_running:
 
-            data = self.conn.recv(65536)
+            try:
+                data = self.conn.recv(65536)
+
+            except socket.timeout:
+                continue
 
             if not data:
                 break
@@ -130,7 +138,9 @@ class TriggerWorker(QRunnable):
 
                 buffer = buffer[PACKET_BYTES:]
 
-                self.all_data.append(packet.copy())
+                # запись без использования RAM
+                self.temp_file.write(packet.tobytes())
+                self.samples_count += len(packet)
 
                 ch1 = (
                     packet.astype(np.float32) + 168
@@ -174,35 +184,64 @@ class TriggerWorker(QRunnable):
             self.start_remote_stream()
 
             self.wait_connection()
+    
+            self.temp_file = open(
+                "trigger_stream.tmp",
+                "wb"
+            )
 
             self.receive_loop()
 
         finally:
 
+            self.save_data()
+
             self.cleanup()
 
             self.signals.finished.emit()
 
-            self.save_data()
 
     def save_data(self):
 
-        if len(self.all_data) == 0:
-            print("No data to save")
+        if self.temp_file:
+            self.temp_file.close()
+
+        if self.samples_count == 0:
+            print("No data received")
             return
 
-        data = np.concatenate(self.all_data)
+
+        raw = np.fromfile(
+            "trigger_stream.tmp",
+            dtype=np.int16
+        )
+
 
         filename = os.path.join(
             self.save_path,
             f"trigger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npz"
         )
 
-        os.makedirs(self.save_path, exist_ok=True)
+        os.makedirs(
+            self.save_path,
+            exist_ok=True
+        )
 
-        np.savez_compressed(filename, msts=np.array(data))
 
-        print(f"Saved {len(data)} samples to {filename}")
+        np.savez_compressed(
+            filename,
+            data=raw.reshape(-1, N),
+            samples=len(raw),
+            timestamp=datetime.now().isoformat(),
+            ip=self.rp_ip
+        )
+
+
+        os.remove("trigger_stream.tmp")
+
+        print(
+            f"Saved {len(raw)} samples -> {filename}"
+        )
 
     def stop(self):
         self._is_running = False
