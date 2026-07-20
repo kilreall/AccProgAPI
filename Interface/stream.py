@@ -11,6 +11,8 @@ import socket
 
 
 N = 16384
+trig_lvl = 0.1
+trig_dly = 8192
 
 
 buffer = queue.Queue(maxsize=50)
@@ -121,9 +123,12 @@ rp.rp_Init()
 rp.rp_AcqReset()
 
 rp.rp_AcqSetDecimation(
-    rp.RP_DEC_64
+    rp.RP_DEC_512
 )
 
+# Set trigger level and delay
+rp.rp_AcqSetTriggerLevel(rp.RP_T_CH_2, trig_lvl)
+rp.rp_AcqSetTriggerDelay(trig_dly)
 
 t1 = threading.Thread(
     target=acquisition

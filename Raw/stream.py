@@ -12,7 +12,7 @@ import socket
 
 N = 16384
 trig_lvl = 0.1
-trig_dly = 0
+trig_dly = 8192
 
 buffer = queue.Queue(maxsize=50)
 
