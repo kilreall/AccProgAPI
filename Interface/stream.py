@@ -7,16 +7,58 @@ import ctypes
 import threading
 import queue
 import socket
-
+import argparse
 
 
 N = 16384
-trig_lvl = 0.1
-trig_dly = 8192
 
 
 buffer = queue.Queue(maxsize=50)
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--pc-ip")
+parser.add_argument("--trig-lvl", type=float)
+parser.add_argument("--trig-dly", type=int)
+parser.add_argument("--trig-src")
+parser.add_argument("--dec", type=int)
+
+args = parser.parse_args()
+
+TRIGGER_MAP = {
+    "CHA_PE": rp.RP_TRIG_SRC_CHA_PE,
+    "CHA_NE": rp.RP_TRIG_SRC_CHA_NE,
+    "CHB_PE": rp.RP_TRIG_SRC_CHB_PE,
+    "CHB_NE": rp.RP_TRIG_SRC_CHB_NE,
+}
+
+TRIGGER_LEVEL_CHANNEL = {
+    "CHA_PE": rp.RP_T_CH_1,
+    "CHA_NE": rp.RP_T_CH_1,
+    "CHB_PE": rp.RP_T_CH_2,
+    "CHB_NE": rp.RP_T_CH_2,
+}
+
+
+trig_cmd = TRIGGER_MAP[args.trig_src]
+
+DEC_MAP = {
+    1: rp.RP_DEC_1,
+    2: rp.RP_DEC_2,
+    4: rp.RP_DEC_4,
+    8: rp.RP_DEC_8,
+    16: rp.RP_DEC_16,
+    32: rp.RP_DEC_32,
+    64: rp.RP_DEC_64,
+    128: rp.RP_DEC_128,
+    256: rp.RP_DEC_256,
+    512: rp.RP_DEC_512,
+    1024: rp.RP_DEC_1024,
+}
+
+
+trig_lvl = args.trig_lvl
+trig_dly = args.trig_dly
 
 def acquisition():
 
@@ -28,26 +70,21 @@ def acquisition():
     while True:
 
 
-        #t1 = time.perf_counter()
         rp.rp_AcqStart()
-        #print("t1", (time.perf_counter() - t1)*1e3)
 
-        #t2 = time.perf_counter()
         rp.rp_AcqSetTriggerSrc(
-            rp.RP_TRIG_SRC_CHB_PE
+            trig_cmd
         )
-        #print("t2", (time.perf_counter() - t2)*1e3)
 
         while not rp.rp_AcqGetBufferFillState()[1]:
             pass
 
-        #t3 = time.perf_counter()
         rp.rp_AcqGetOldestDataRaw(
             rp.RP_CH_1,
             N,
             ibuff1.cast()
         )
-        #print("t3", (time.perf_counter() - t3)*1e3)
+
 
         # rp.rp_AcqGetOldestDataRaw(
         #     rp.RP_CH_2,
@@ -55,20 +92,18 @@ def acquisition():
         #     ibuff2.cast()
         # )
 
-        #t4 = time.perf_counter()
         ptr1 = ctypes.cast(
             int(ibuff1.cast()),
             ctypes.POINTER(ctypes.c_int16)
         )
-        #print("t4", (time.perf_counter() - t4)*1e3)
 
-        #t5 = time.perf_counter()
+
         ch1 = np.ctypeslib.as_array(
             ptr1,
             shape=(N,)
         ).copy()
         
-        #print("t5", (time.perf_counter() - t5)*1e3)
+
 
         # ch2 = np.ctypeslib.as_array(
         #     ibuff2,
@@ -77,9 +112,7 @@ def acquisition():
 
         
         try:
-            #t6 = time.perf_counter()
             buffer.put_nowait((ch1))
-            #print("t6", (time.perf_counter() - t6)*1e3)
         except queue.Full:
             print("Buffer full, dropping packet")
             # Или: buffer.get() # удалить самый старый пакет
@@ -93,7 +126,7 @@ def sender():
     )
 
     sock.connect(
-        ("192.168.55.224",5000)
+        (args.pc_ip,5000)
     )
 
 
@@ -110,9 +143,7 @@ def sender():
 
         
         try:
-            #ts = time.perf_counter()
             sock.sendall(packet.tobytes())
-            #print("ts", (time.perf_counter()-ts)*1e3)
         except socket.error as e:
             print(f"Network error: {e}")
             # Сохранить данные или переподключиться
@@ -123,11 +154,11 @@ rp.rp_Init()
 rp.rp_AcqReset()
 
 rp.rp_AcqSetDecimation(
-    rp.RP_DEC_512
+    DEC_MAP[args.dec]
 )
 
 # Set trigger level and delay
-rp.rp_AcqSetTriggerLevel(rp.RP_T_CH_2, trig_lvl)
+rp.rp_AcqSetTriggerLevel(TRIGGER_LEVEL_CHANNEL[args.trig_src], trig_lvl)
 rp.rp_AcqSetTriggerDelay(trig_dly)
 
 t1 = threading.Thread(
