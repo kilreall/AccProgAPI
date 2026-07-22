@@ -32,6 +32,8 @@ TRIGGER_MAP = {
     "CHB_NE": rp.RP_TRIG_SRC_CHB_NE,
 }
 
+trig_cmd = TRIGGER_MAP[args.trig_src]
+
 TRIGGER_LEVEL_CHANNEL = {
     "CHA_PE": rp.RP_T_CH_1,
     "CHA_NE": rp.RP_T_CH_1,
@@ -39,8 +41,6 @@ TRIGGER_LEVEL_CHANNEL = {
     "CHB_NE": rp.RP_T_CH_2,
 }
 
-
-trig_cmd = TRIGGER_MAP[args.trig_src]
 
 DEC_MAP = {
     1: rp.RP_DEC_1,
@@ -76,6 +76,13 @@ def acquisition():
             trig_cmd
         )
 
+        # Trigger state
+        while 1:
+            trig_state = rp.rp_AcqGetTriggerState()[1]
+            if trig_state == rp.RP_TRIG_STATE_TRIGGERED:
+                break
+
+        # Trigger fill
         while not rp.rp_AcqGetBufferFillState()[1]:
             pass
 
@@ -152,6 +159,9 @@ def sender():
 rp.rp_Init()
 
 rp.rp_AcqReset()
+
+rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_HIGH)
+rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_HIGH)
 
 rp.rp_AcqSetDecimation(
     DEC_MAP[args.dec]
