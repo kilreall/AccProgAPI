@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QComboBox
 )
 from datetime import datetime
-import sys, time, random, os, socket, paramiko
+import sys, os, socket, paramiko
 import numpy as np
 import time
 import pyqtgraph as pg
@@ -13,20 +13,20 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
 N = 16384
-PACKET_BYTES = N * 2
 
 
 class TriggerWorkerSignals(QObject):
     finished = pyqtSignal()
-    data = pyqtSignal(np.ndarray)
+    data = pyqtSignal(object)
 
 class TriggerWorker(QRunnable):
-    def __init__(self, rp_ip, pc_ip, save_path, dec, trig_src, trig_lvl, trig_dly, mode):
+    def __init__(self, rp_ip, pc_ip, save_path, dec, trig_src, trig_lvl, trig_dly, mode, ch):
         super().__init__()
         self.rp_ip = rp_ip
         self.pc_ip = pc_ip
         self.dec = dec
         self.mode = mode
+        self.ch = ch
         self.trig_src = trig_src
         self.trig_lvl = trig_lvl
         self.trig_dly = trig_dly
@@ -71,6 +71,7 @@ class TriggerWorker(QRunnable):
             f"--trig-src {self.trig_src} "
             f"--dec {self.dec} "
             f"--mode {self.mode} "
+            f"--channels {self.ch} "
         )
 
         self.stdin, self.stdout, self.stderr = \
@@ -91,6 +92,11 @@ class TriggerWorker(QRunnable):
 
     def receive_loop(self):
 
+        pb = N*2
+
+        if self.ch =="CH1+CH2":
+            pb = pb*2
+
         buffer = bytearray()
 
         while self._is_running:
@@ -106,24 +112,68 @@ class TriggerWorker(QRunnable):
 
             buffer.extend(data)
 
-            while len(buffer) >= PACKET_BYTES:
+            while len(buffer) >= pb:
 
                 packet = np.frombuffer(
-                    buffer[:PACKET_BYTES],
+                    buffer[:pb],
                     dtype=np.int16
-                )
+                ).copy()
 
-                buffer = buffer[PACKET_BYTES:]
+                buffer = buffer[pb:]
 
-                # запись без использования RAM
-                self.temp_file.write(packet.tobytes())
-                self.samples_count += len(packet)
 
-                ch1 = (
-                    packet.astype(np.float32) + 168
-                ) / 8191 * 20
+                if self.ch == "CH1+CH2":
 
-                self.signals.data.emit(ch1)
+                    ch1 = packet[:N]
+                    ch2 = packet[N:N*2]
+
+
+                    self.temp_file.write(
+                        ch1.tobytes()
+                    )
+
+                    self.temp_file.write(
+                        ch2.tobytes()
+                    )
+
+
+                    self.samples_count += N
+
+
+                    ch1 = (
+                        ch1.astype(np.float32)+168
+                    )/8191*20
+
+
+                    ch2 = (
+                        ch2.astype(np.float32)+168
+                    )/8191*20
+
+
+                    self.signals.data.emit(
+                        (ch1,ch2)
+                    )
+
+
+                else:
+
+
+                    self.temp_file.write(
+                        packet.tobytes()
+                    )
+
+
+                    self.samples_count += len(packet)
+
+
+                    proc = (
+                        packet.astype(np.float32)+168
+                    )/8191*20
+
+
+                    self.signals.data.emit(
+                        proc
+                    )
 
     def cleanup(self):
 
@@ -205,13 +255,35 @@ class TriggerWorker(QRunnable):
         )
 
 
-        np.savez_compressed(
-            filename,
-            data=raw.reshape(-1, N),
-            samples=len(raw),
-            timestamp=datetime.now().isoformat(),
-            ip=self.rp_ip
-        )
+        if self.ch == "CH1+CH2":
+
+            frames = raw.reshape(-1, 2, N)
+
+            ch1 = frames[:,0,:]
+            ch2 = frames[:,1,:]
+
+
+            np.savez_compressed(
+                filename,
+                CH1=ch1,
+                CH2=ch2,
+                samples=ch1.size,
+                timestamp=datetime.now().isoformat(),
+                ip=self.rp_ip
+            )
+
+
+        else:
+
+            data = raw.reshape(-1,N)
+
+            np.savez_compressed(
+                filename,
+                data=data,
+                samples=len(raw),
+                timestamp=datetime.now().isoformat(),
+                ip=self.rp_ip
+            )
 
 
         os.remove("trigger_stream.tmp")
@@ -286,6 +358,15 @@ class MainWindow(QWidget):
         ])
         self.mode_input.setCurrentText("HV")
 
+        self.ch_label = QLabel("Channels:")
+        self.ch_input = QComboBox()
+        self.ch_input.addItems([
+            "CH1",
+            "CH2",
+            "CH1+CH2"
+        ])
+        self.ch_input.setCurrentText("CH1")
+
         self.trig_lvl_label = QLabel("Trigger level:")
         self.trig_lvl = QDoubleSpinBox()
         self.trig_lvl.setFixedSize(60, 25)
@@ -335,6 +416,8 @@ class MainWindow(QWidget):
         left_layout.addWidget(self.trig_input)
         left_layout.addWidget(self.mode_label)
         left_layout.addWidget(self.mode_input)
+        left_layout.addWidget(self.ch_label)
+        left_layout.addWidget(self.ch_input)
         left_layout.addWidget(self.trig_lvl_label)
         left_layout.addWidget(self.trig_lvl)
         left_layout.addWidget(self.trig_dly_label)
@@ -379,7 +462,8 @@ class MainWindow(QWidget):
             trig_src=self.trig_input.currentText(),
             trig_lvl=self.trig_lvl.value(),
             trig_dly=self.trig_dly.value(),
-            mode = self.mode_input.currentText()
+            mode = self.mode_input.currentText(),
+            ch = self.ch_input.currentText()
         )
         self.trigger_worker.signals.finished.connect(self.trigger_worker_finished)
         self.trigger_worker.signals.data.connect(self.update_plot_trigger)
@@ -396,32 +480,55 @@ class MainWindow(QWidget):
         self.trigger_worker = None
 
 
-    @pyqtSlot(np.ndarray)
-    def update_plot_trigger(self, ch1_proc):
+    @pyqtSlot(object)
+    def update_plot_trigger(self, data):
 
         now = time.perf_counter()
 
-        if self.last_frame_time is not None:
-            dt = (now - self.last_frame_time) * 1000  # мс
+        if self.ch_input.currentText()=="CH1+CH2":
 
-            print(
-                f"Frame {self.frame_counter}: "
-                f"{dt:.3f} ms  "
-            )
 
-        self.last_frame_time = now
-        self.frame_counter += 1
+            ch1, ch2 = data
 
-        self.plot1.setData(ch1_proc)
-        self.plot2.clear()
 
-    # @pyqtSlot(np.ndarray)
-    # def update_plot_continuous(self, data):
-    #     if data.dtype == np.int16:
-    #         proc = (data.astype(np.float32) + 168) / 8191.0 * 20
-    #     else:
-    #         proc = data
-    #     self.plot1.setData(proc)
+            self.plot1.setData(ch1)
+            self.plot2.setData(ch2)
+
+            if self.last_frame_time is not None:
+                dt = (now - self.last_frame_time) * 1000  # мс
+
+                print(
+                    f"Frame {self.frame_counter}: "
+                    f"{dt:.3f} ms  "
+                )
+
+            self.last_frame_time = now
+            self.frame_counter += 1
+
+
+        else:
+
+            if self.last_frame_time is not None:
+                dt = (now - self.last_frame_time) * 1000  # мс
+
+                print(
+                    f"Frame {self.frame_counter}: "
+                    f"{dt:.3f} ms  "
+                )
+
+            self.last_frame_time = now
+            self.frame_counter += 1
+
+            if self.ch_input.currentText() == "CH1":
+
+                self.plot1.setData(data)
+
+            else:
+                                
+                self.plot2.setData(data)
+
+
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

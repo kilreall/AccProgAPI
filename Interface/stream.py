@@ -12,7 +12,6 @@ import argparse
 
 N = 16384
 
-
 buffer = queue.Queue(maxsize=50)
 
 parser = argparse.ArgumentParser()
@@ -23,8 +22,10 @@ parser.add_argument("--trig-dly", type=int)
 parser.add_argument("--trig-src")
 parser.add_argument("--dec", type=int)
 parser.add_argument("--mode")
+parser.add_argument("--channels")
 
 args = parser.parse_args()
+
 
 TRIGGER_MAP = {
     "CHA_PE": rp.RP_TRIG_SRC_CHA_PE,
@@ -47,6 +48,7 @@ MODE_MAP = {
     "LV": rp.RP_LOW,
 }
 
+
 DEC_MAP = {
     1: rp.RP_DEC_1,
     2: rp.RP_DEC_2,
@@ -62,15 +64,11 @@ DEC_MAP = {
 }
 
 
-trig_lvl = args.trig_lvl
-trig_dly = args.trig_dly
 
 def acquisition():
 
     ibuff1 = rp.i16Buffer(N)
-    #ibuff2 = rp.i16Buffer(N)
-
-    
+    ibuff2 = rp.i16Buffer(N)
 
     while True:
 
@@ -91,74 +89,78 @@ def acquisition():
         while not rp.rp_AcqGetBufferFillState()[1]:
             pass
 
-        rp.rp_AcqGetOldestDataRaw(
-            rp.RP_CH_1,
-            N,
-            ibuff1.cast()
-        )
+        if args.channels in ("CH1", "CH1+CH2"):
+
+            rp.rp_AcqGetOldestDataRaw(
+                rp.RP_CH_1,
+                N,
+                ibuff1.cast()
+            )
+
+            ptr1 = ctypes.cast(
+                int(ibuff1.cast()),
+                ctypes.POINTER(ctypes.c_int16)
+            )
 
 
-        # rp.rp_AcqGetOldestDataRaw(
-        #     rp.RP_CH_2,
-        #     N,
-        #     ibuff2.cast()
-        # )
+            ch1 = np.ctypeslib.as_array(
+                ptr1,
+                shape=(N,)
+            ).copy()
 
-        ptr1 = ctypes.cast(
-            int(ibuff1.cast()),
-            ctypes.POINTER(ctypes.c_int16)
-        )
+            ch = ch1
 
+        if args.channels in ("CH2", "CH1+CH2"):
 
-        ch1 = np.ctypeslib.as_array(
-            ptr1,
-            shape=(N,)
-        ).copy()
-        
+            rp.rp_AcqGetOldestDataRaw(
+                rp.RP_CH_2,
+                N,
+                ibuff2.cast()
+            )
 
 
-        # ch2 = np.ctypeslib.as_array(
-        #     ibuff2,
-        #     shape=(N,)
-        # ).copy()
+            ptr2 = ctypes.cast(
+                int(ibuff2.cast()),
+                ctypes.POINTER(ctypes.c_int16)
+            )
 
+
+            ch2 = np.ctypeslib.as_array(
+                ptr2,
+                shape=(N,)
+            ).copy()
+
+            ch = ch2
         
         try:
-            buffer.put_nowait((ch1))
+            if args.channels in ("CH1", "CH2"):
+                buffer.put_nowait((ch))
+            else:
+                buffer.put_nowait((ch1, ch2))
         except queue.Full:
             print("Buffer full, dropping packet")
             # Или: buffer.get() # удалить самый старый пакет
             # Или: увеличить размер буфера
 
-def sender():
-
-    sock = socket.socket(
-        socket.AF_INET,
-        socket.SOCK_STREAM
-    )
-
-    sock.connect(
-        (args.pc_ip,5000)
-    )
-
+def sender(sock):
 
     while True:
 
-        ch1 = buffer.get()
-        #ch1,ch2 = buffer.get()
+        data = buffer.get()
 
+        if args.channels in ("CH1", "CH2"):
+            packet = data
 
-        # packet = np.concatenate(
-        #     (ch1) #,ch2)
-        # ).astype(np.int16)
-        packet = ch1
+        else:
+            ch1, ch2 = data
+            packet = np.concatenate((ch1,ch2))
 
-        
         try:
             sock.sendall(packet.tobytes())
         except socket.error as e:
             print(f"Network error: {e}")
             # Сохранить данные или переподключиться
+
 
 
 rp.rp_Init()
@@ -175,15 +177,26 @@ rp.rp_AcqSetDecimation(
 )
 
 # Set trigger level and delay
-rp.rp_AcqSetTriggerLevel(TRIGGER_LEVEL_CHANNEL[args.trig_src], trig_lvl)
-rp.rp_AcqSetTriggerDelay(trig_dly)
+rp.rp_AcqSetTriggerLevel(TRIGGER_LEVEL_CHANNEL[args.trig_src], args.trig_lvl)
+rp.rp_AcqSetTriggerDelay(args.trig_dly)
+
+sock = socket.socket(
+    socket.AF_INET,
+    socket.SOCK_STREAM
+)
+
+sock.connect(
+    (args.pc_ip,5000)
+)
+
 
 t1 = threading.Thread(
-    target=acquisition
+    target=acquisition   
 )
 
 t2 = threading.Thread(
-    target=sender
+    target=sender,
+    args=(sock,)
 )
 
 
