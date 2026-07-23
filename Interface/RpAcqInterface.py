@@ -21,11 +21,12 @@ class TriggerWorkerSignals(QObject):
     data = pyqtSignal(np.ndarray)
 
 class TriggerWorker(QRunnable):
-    def __init__(self, rp_ip, pc_ip, save_path, dec, trig_src, trig_lvl, trig_dly):
+    def __init__(self, rp_ip, pc_ip, save_path, dec, trig_src, trig_lvl, trig_dly, mode):
         super().__init__()
         self.rp_ip = rp_ip
         self.pc_ip = pc_ip
         self.dec = dec
+        self.mode = mode
         self.trig_src = trig_src
         self.trig_lvl = trig_lvl
         self.trig_dly = trig_dly
@@ -68,7 +69,8 @@ class TriggerWorker(QRunnable):
             f"--trig-lvl {self.trig_lvl} "
             f"--trig-dly {self.trig_dly} "
             f"--trig-src {self.trig_src} "
-            f"--dec {self.dec}"
+            f"--dec {self.dec} "
+            f"--mode {self.mode} "
         )
 
         self.stdin, self.stdout, self.stderr = \
@@ -276,6 +278,14 @@ class MainWindow(QWidget):
         ])
         self.trig_input.setCurrentText("CHB_PE")
 
+        self.mode_label = QLabel("Mode:")
+        self.mode_input = QComboBox()
+        self.mode_input.addItems([
+            "LV",
+            "HV"
+        ])
+        self.mode_input.setCurrentText("HV")
+
         self.trig_lvl_label = QLabel("Trigger level:")
         self.trig_lvl = QDoubleSpinBox()
         self.trig_lvl.setFixedSize(60, 25)
@@ -323,6 +333,8 @@ class MainWindow(QWidget):
         left_layout.addWidget(self.dec_input)
         left_layout.addWidget(self.trig_label)
         left_layout.addWidget(self.trig_input)
+        left_layout.addWidget(self.mode_label)
+        left_layout.addWidget(self.mode_input)
         left_layout.addWidget(self.trig_lvl_label)
         left_layout.addWidget(self.trig_lvl)
         left_layout.addWidget(self.trig_dly_label)
@@ -366,7 +378,8 @@ class MainWindow(QWidget):
             dec = int(self.dec_input.currentText()),
             trig_src=self.trig_input.currentText(),
             trig_lvl=self.trig_lvl.value(),
-            trig_dly=self.trig_dly.value()
+            trig_dly=self.trig_dly.value(),
+            mode = self.mode_input.currentText()
         )
         self.trigger_worker.signals.finished.connect(self.trigger_worker_finished)
         self.trigger_worker.signals.data.connect(self.update_plot_trigger)

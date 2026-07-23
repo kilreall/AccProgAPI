@@ -98,7 +98,7 @@ def acquisition():
         t6 = time.perf_counter()
         try:
             buffer.put_nowait((ch1))
-            print("tsend", (time.perf_counter() - t6)*1e3)
+            print("tput", (time.perf_counter() - t6)*1e3)
         except queue.Full:
             print("Buffer full, dropping packet")
             # Или: buffer.get() # удалить самый старый пакет
@@ -131,9 +131,9 @@ def sender():
 
         
         try:
-            #ts = time.perf_counter()
+            ts = time.perf_counter()
             sock.sendall(packet.tobytes())
-            #print("ts", (time.perf_counter()-ts)*1e3)
+            print("ts", (time.perf_counter()-ts)*1e3)
         except socket.error as e:
             print(f"Network error: {e}")
             # Сохранить данные или переподключиться
@@ -142,6 +142,9 @@ def sender():
 rp.rp_Init()
 
 rp.rp_AcqReset()
+
+rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_HIGH)
+rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_HIGH)
 
 rp.rp_AcqSetDecimation(
     rp.RP_DEC_512

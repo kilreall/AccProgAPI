@@ -22,6 +22,7 @@ parser.add_argument("--trig-lvl", type=float)
 parser.add_argument("--trig-dly", type=int)
 parser.add_argument("--trig-src")
 parser.add_argument("--dec", type=int)
+parser.add_argument("--mode")
 
 args = parser.parse_args()
 
@@ -41,6 +42,10 @@ TRIGGER_LEVEL_CHANNEL = {
     "CHB_NE": rp.RP_T_CH_2,
 }
 
+MODE_MAP = {
+    "HV": rp.RP_HIGH,
+    "LV": rp.RP_LOW,
+}
 
 DEC_MAP = {
     1: rp.RP_DEC_1,
@@ -160,8 +165,10 @@ rp.rp_Init()
 
 rp.rp_AcqReset()
 
-rp.rp_AcqSetGain(rp.RP_CH_1, rp.RP_HIGH)
-rp.rp_AcqSetGain(rp.RP_CH_2, rp.RP_HIGH)
+gain = MODE_MAP[args.mode]
+
+rp.rp_AcqSetGain(rp.RP_CH_1, gain)
+rp.rp_AcqSetGain(rp.RP_CH_2, gain)
 
 rp.rp_AcqSetDecimation(
     DEC_MAP[args.dec]
