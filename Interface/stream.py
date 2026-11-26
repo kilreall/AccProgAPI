@@ -8,6 +8,7 @@ import threading
 import queue
 import socket
 import argparse
+import os
 
 
 N = 16384
@@ -21,7 +22,8 @@ parser.add_argument("--trig-lvl", type=float)
 parser.add_argument("--trig-dly", type=int)
 parser.add_argument("--trig-src")
 parser.add_argument("--dec", type=int)
-parser.add_argument("--mode")
+parser.add_argument("--mode-ch1", default="HV")   # ⬅ раздельно
+parser.add_argument("--mode-ch2", default="HV")
 parser.add_argument("--channels")
 
 args = parser.parse_args()
@@ -158,8 +160,8 @@ def sender(sock):
         try:
             sock.sendall(packet.tobytes())
         except socket.error as e:
-            print(f"Network error: {e}")
-            # Сохранить данные или переподключиться
+            print(f"Network error: {e} — exiting")
+            os._exit(0)     # убить весь процесс, включая acquisition-поток
 
 
 
@@ -167,10 +169,11 @@ rp.rp_Init()
 
 rp.rp_AcqReset()
 
-gain = MODE_MAP[args.mode]
+gain1 = MODE_MAP[args.mode_ch1]
+gain2 = MODE_MAP[args.mode_ch2]
 
-rp.rp_AcqSetGain(rp.RP_CH_1, gain)
-rp.rp_AcqSetGain(rp.RP_CH_2, gain)
+rp.rp_AcqSetGain(rp.RP_CH_1, gain1)
+rp.rp_AcqSetGain(rp.RP_CH_2, gain2)
 
 rp.rp_AcqSetDecimation(
     DEC_MAP[args.dec]
