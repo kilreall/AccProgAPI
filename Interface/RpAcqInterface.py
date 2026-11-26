@@ -310,6 +310,19 @@ class TriggerWorker(QRunnable):
         SCALE_V = {"HV": 20.0, "LV": 1.0}
         scale1 = SCALE_V[self.mode_ch1]
         scale2 = SCALE_V[self.mode_ch2]
+
+        OFFSET_LSB = {
+            "CH1": {"HV": 89,  "LV": 91},
+            "CH2": {"HV": 119, "LV": 121},
+        }
+        offset1 = OFFSET_LSB["CH1"][self.mode_ch1]
+        offset2 = OFFSET_LSB["CH2"][self.mode_ch2]
+        if self.ch == "CH1":
+            offset_single = offset1
+        else:
+            offset_single = offset2
+
+
         if self.ch == "CH1":
             scale_single = scale1
         else:   # CH2
@@ -354,8 +367,8 @@ class TriggerWorker(QRunnable):
                     self.samples_count += N
 
                     # ⬅ разные масштабы для разных режимов
-                    ch1 = (ch1.astype(np.float32) + 168) / 8191 * scale1
-                    ch2 = (ch2.astype(np.float32) + 168) / 8191 * scale2
+                    ch1 = (ch1.astype(np.float32) + offset1) / 8191 * scale1
+                    ch2 = (ch2.astype(np.float32) + offset2) / 8191 * scale2
 
                     self.signals.data.emit((ch1, ch2))
 

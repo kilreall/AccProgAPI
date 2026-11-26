@@ -9,6 +9,28 @@ import queue
 import socket
 import argparse
 import os
+import signal
+import atexit
+
+def _release_rp():
+    try:
+        rp.rp_Release()
+        print("[RP] rp_Release done")
+    except Exception as e:
+        print(f"[RP] rp_Release error: {e}")
+
+# на любой штатный выход интерпретатора
+atexit.register(_release_rp)
+
+# на Ctrl+C (SIGINT) и kill (SIGTERM) — «жёсткий» выход,
+# т.к. потоки не daemon и сами не завершатся
+def _on_signal(signum, frame):
+    print(f"[RP] signal {signum} — shutting down")
+    _release_rp()
+    os._exit(0)
+
+signal.signal(signal.SIGINT, _on_signal)
+signal.signal(signal.SIGTERM, _on_signal)
 
 
 N = 16384
@@ -76,16 +98,16 @@ def acquisition():
 
 
         rp.rp_AcqStart()
-
+        rp.rp_AcqSetTriggerSrc(rp.RP_TRIG_SRC_DISABLED)
         rp.rp_AcqSetTriggerSrc(
             trig_cmd
         )
 
-        # Trigger state
-        while 1:
-            trig_state = rp.rp_AcqGetTriggerState()[1]
-            if trig_state == rp.RP_TRIG_STATE_TRIGGERED:
-                break
+        # # Trigger state
+        # while 1:
+        #     trig_state = rp.rp_AcqGetTriggerState()[1]
+        #     if trig_state == rp.RP_TRIG_STATE_TRIGGERED:
+        #         break
 
         # Trigger fill
         while not rp.rp_AcqGetBufferFillState()[1]:
