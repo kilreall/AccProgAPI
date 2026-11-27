@@ -311,23 +311,6 @@ class TriggerWorker(QRunnable):
         scale1 = SCALE_V[self.mode_ch1]
         scale2 = SCALE_V[self.mode_ch2]
 
-        OFFSET_LSB = {
-            "CH1": {"HV": 89,  "LV": 91},
-            "CH2": {"HV": 119, "LV": 121},
-        }
-        offset1 = OFFSET_LSB["CH1"][self.mode_ch1]
-        offset2 = OFFSET_LSB["CH2"][self.mode_ch2]
-        if self.ch == "CH1":
-            offset_single = offset1
-        else:
-            offset_single = offset2
-
-
-        if self.ch == "CH1":
-            scale_single = scale1
-        else:   # CH2
-            scale_single = scale2
-
         buffer = bytearray()
 
         while self._is_running:
@@ -367,8 +350,11 @@ class TriggerWorker(QRunnable):
                     self.samples_count += N
 
                     # ⬅ разные масштабы для разных режимов
-                    ch1 = (ch1.astype(np.float32) + offset1) / 8191 * scale1
-                    ch2 = (ch2.astype(np.float32) + offset2) / 8191 * scale2
+                    # ch1 = (ch1.astype(np.float32) + offset1) / 8191 * scale1
+                    # ch2 = (ch2.astype(np.float32) + offset2) / 8191 * scale2
+
+                    ch1 = ch1.astype(np.float32) / 8191 * scale1
+                    ch2 = ch2.astype(np.float32) / 8191 * scale2
 
                     self.signals.data.emit((ch1, ch2))
 
@@ -381,7 +367,7 @@ class TriggerWorker(QRunnable):
                     self.samples_count += len(packet)
 
                     # ⬅ масштаб зависит от того, какой канал выбран
-                    proc = (packet.astype(np.float32) + 168) / 8191 * scale_single
+                    proc = (packet.astype(np.float32)) / 8191 * scale_single
 
                     self.signals.data.emit(proc)
 
@@ -565,7 +551,7 @@ class MainWindow(QWidget):
         self.mode_ch1_input = QComboBox()
         self.mode_ch1_input.setFixedSize(60, 25)
         self.mode_ch1_input.addItems(["LV", "HV"])
-        self.mode_ch1_input.setCurrentText("HV")
+        self.mode_ch1_input.setCurrentText("LV")
 
         self.mode_ch2_label = QLabel("Mode CH2:")
         self.mode_ch2_input = QComboBox()
@@ -580,19 +566,19 @@ class MainWindow(QWidget):
             "CH2",
             "CH1+CH2"
         ])
-        self.ch_input.setCurrentText("CH1")
+        self.ch_input.setCurrentText("CH1+CH2")
 
         self.trig_lvl_label = QLabel("Trigger level:")
         self.trig_lvl = QDoubleSpinBox()
         self.trig_lvl.setFixedSize(60, 25)
         self.trig_lvl.setRange(-20, 20)
-        self.trig_lvl.setValue(0.1)
+        self.trig_lvl.setValue(2.0)
 
         self.trig_dly_label = QLabel("Trigger delay:")
         self.trig_dly = QSpinBox()
         self.trig_dly.setFixedSize(60, 25)
         self.trig_dly.setRange(-8192, 100000)
-        self.trig_dly.setValue(-8192)
+        self.trig_dly.setValue(-6800)
 
 
  
@@ -618,9 +604,10 @@ class MainWindow(QWidget):
         self.plot_widget_ch1.setXLink(self.plot_widget_ch2)
 
         # --- top-right: имя скрипта + мини-кнопка ---
-        self.script_name_input = QLineEdit()                       # ⬅ было QLabel
+        self.script_name_input = QLineEdit()
         self.script_name_input.setFixedSize(160, 25)
-        self.script_name_input.setPlaceholderText("stream.py")
+        self.script_name_input.setText("stream.py")          # ⬅ реальный текст, а не placeholder
+        self.script_name_input.setPlaceholderText("stream.py")  # остаётся подсказкой, если пользователь всё сотрёт
         self.script_name_input.setToolTip(
             "Имя скрипта в /root на Red Pitaya (запускается по Start)")
 

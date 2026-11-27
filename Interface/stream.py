@@ -89,82 +89,67 @@ DEC_MAP = {
 
 
 
-def acquisition():
+def check_rp(result, operation):
+    code = result[0] if isinstance(result, (list, tuple)) else result
+    if code != rp.RP_OK:
+        raise RuntimeError(f"{operation}: {rp.rp_GetError(code)} (код {code})")
+    return result
 
-    ibuff1 = rp.i16Buffer(N)
-    ibuff2 = rp.i16Buffer(N)
+
+def acquisition():
+    channels = {
+        "CH1": (rp.RP_CH_1,),
+        "CH2": (rp.RP_CH_2,),
+        "CH1+CH2": (rp.RP_CH_1, rp.RP_CH_2),
+    }[args.channels]
+    adc_buffers = [rp.i16Buffer(N) for _ in channels]
 
     while True:
-
-
-        rp.rp_AcqStart()
-        rp.rp_AcqSetTriggerSrc(rp.RP_TRIG_SRC_DISABLED)
-        rp.rp_AcqSetTriggerSrc(
-            trig_cmd
+        check_rp(
+            rp.rp_AcqSetTriggerSrc(rp.RP_TRIG_SRC_DISABLED),
+            "Отключение триггера",
         )
+        check_rp(rp.rp_AcqStart(), "Запуск захвата")
 
-        # # Trigger state
-        # while 1:
-        #     trig_state = rp.rp_AcqGetTriggerState()[1]
-        #     if trig_state == rp.RP_TRIG_STATE_TRIGGERED:
-        #         break
+        # Заполняем буфер свежими отсчётами до включения триггера.
+        # 125 МГц — частота АЦП STEMlab 125-14.
+        time.sleep(N * args.dec / 125_000_000 + 0.001)
+        check_rp(rp.rp_AcqSetTriggerSrc(trig_cmd), "Включение триггера")
 
-        # Trigger fill
-        while not rp.rp_AcqGetBufferFillState()[1]:
-            pass
+        while True:
+            state = check_rp(rp.rp_AcqGetTriggerState(), "Состояние триггера")[1]
+            if state == rp.RP_TRIG_STATE_TRIGGERED:
+                break
+            time.sleep(0.0001)
 
-        if args.channels in ("CH1", "CH1+CH2"):
+        while not check_rp(rp.rp_AcqGetBufferFillState(), "Заполнение буфера")[1]:
+            time.sleep(0.0001)
 
-            rp.rp_AcqGetOldestDataRaw(
-                rp.RP_CH_1,
-                N,
-                ibuff1.cast()
+        check_rp(rp.rp_AcqStop(), "Остановка захвата")
+        write_pos = check_rp(rp.rp_AcqGetWritePointer(), "Позиция записи")[1]
+        start_pos = (write_pos + 1) % N
+
+        samples = []
+        for channel, adc_buffer in zip(channels, adc_buffers):
+            result = check_rp(
+                rp.rp_AcqGetDataRawWithCalib(
+                    channel, start_pos, N, adc_buffer.cast()
+                ),
+                f"Чтение канала {channel + 1}",
             )
+            if result[1] != N:
+                raise RuntimeError(f"Прочитано {result[1]} отсчётов вместо {N}")
 
-            ptr1 = ctypes.cast(
-                int(ibuff1.cast()),
-                ctypes.POINTER(ctypes.c_int16)
+            ptr = ctypes.cast(
+                int(adc_buffer.cast()),
+                ctypes.POINTER(ctypes.c_int16),
             )
+            samples.append(np.ctypeslib.as_array(ptr, shape=(N,)).copy())
 
-
-            ch1 = np.ctypeslib.as_array(
-                ptr1,
-                shape=(N,)
-            ).copy()
-
-            ch = ch1
-
-        if args.channels in ("CH2", "CH1+CH2"):
-
-            rp.rp_AcqGetOldestDataRaw(
-                rp.RP_CH_2,
-                N,
-                ibuff2.cast()
-            )
-
-
-            ptr2 = ctypes.cast(
-                int(ibuff2.cast()),
-                ctypes.POINTER(ctypes.c_int16)
-            )
-
-
-            ch2 = np.ctypeslib.as_array(
-                ptr2,
-                shape=(N,)
-            ).copy()
-
-            ch = ch2
-        
         try:
-            if args.channels in ("CH1", "CH2"):
-                buffer.put_nowait((ch))
-            else:
-                buffer.put_nowait((ch1, ch2))
+            buffer.put_nowait(samples[0] if len(samples) == 1 else tuple(samples))
         except queue.Full:
             print("Buffer full, dropping packet")
-            # Или: buffer.get() # удалить самый старый пакет
-            # Или: увеличить размер буфера
 
 def sender(sock):
 
